@@ -1,0 +1,152 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+from collections import deque
+from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+
+# ---------------------------------------
+# Connect to CoppeliaSim
+# ---------------------------------------
+print("🔌 Connecting to CoppeliaSim...")
+client = RemoteAPIClient()
+sim = client.getObject('sim')
+left_motor = sim.getObject('/PioneerP3DX/leftMotor')
+right_motor = sim.getObject('/PioneerP3DX/rightMotor')
+print("✅ Connected to CoppeliaSim!")
+
+# ---------------------------------------
+# Initialize MediaPipe Hands
+# ---------------------------------------
+mp_hands = mp.solutions.hands
+mp_draw = mp.solutions.drawing_utils
+hands = mp_hands.Hands(
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+)
+
+cap = cv2.VideoCapture(0)
+
+# Reduce capture resolution
+cap.set(3, 480)
+cap.set(4, 360)
+
+# Create smaller window
+cv2.namedWindow("🤖 One-Hand Gesture Control - Pioneer P3DX", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("🤖 One-Hand Gesture Control - Pioneer P3DX", 480, 360)
+
+# ---------------------------------------
+# Helper Functions
+# ---------------------------------------
+def move_robot(lv, rv):
+    """Set left and right motor speeds"""
+    sim.setJointTargetVelocity(left_motor, lv)
+    sim.setJointTargetVelocity(right_motor, rv)
+
+def get_finger_states(hand):
+    """
+    Returns list of which fingers are up: [thumb, index, middle, ring, pinky]
+    """
+    tips = [4, 8, 12, 16, 20]
+    fingers = []
+
+    # Thumb (horizontal comparison)
+    if hand.landmark[tips[0]].x < hand.landmark[tips[0] - 1].x:
+        fingers.append(1)
+    else:
+        fingers.append(0)
+
+    # Other four fingers (vertical comparison)
+    for i in range(1, 5):
+        if hand.landmark[tips[i]].y < hand.landmark[tips[i] - 2].y:
+            fingers.append(1)
+        else:
+            fingers.append(0)
+
+    return fingers
+
+# ---------------------------------------
+# Control Variables
+# ---------------------------------------
+gesture_hist = deque(maxlen=5)
+speed = 2.0
+
+print("\n🖐️ ONE-HAND GESTURE CONTROL READY:")
+print("✊ 0 Fingers → Stop")
+print("☝️ 1 Finger → Forward")
+print("✌️ 2 Fingers → Backward")
+print("🤟 3 Fingers → Turn Right")
+print("🖐️ 4 or 5 Fingers → Turn Left")
+print("Press 'q' to quit.\n")
+
+# ---------------------------------------
+# Main Loop
+# ---------------------------------------
+while True:
+    success, frame = cap.read()
+    if not success:
+        break
+
+    frame = cv2.flip(frame, 1)
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(rgb)
+    gesture = "Stop"
+
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            # Draw hand landmarks
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
+            # Get finger states
+            fingers = get_finger_states(hand_landmarks)
+            gesture_hist.append(fingers)
+
+            # Smooth results
+            avg_fingers = np.mean(gesture_hist, axis=0).round().astype(int)
+            total = np.sum(avg_fingers)
+
+            # -----------------------------
+            # Gesture Mapping
+            # -----------------------------
+            if total == 0:
+                gesture = "Stop"
+                move_robot(0, 0)
+            elif total == 1:
+                gesture = "Forward"
+                move_robot(speed, speed)
+            elif total == 2:
+                gesture = "Backward"
+                move_robot(-speed, -speed)
+            elif total == 3:
+                gesture = "Turn Right"
+                move_robot(speed, -speed)
+            elif total >= 4:
+                gesture = "Turn Left"
+                move_robot(-speed, speed)
+            else:
+                gesture = "Stop"
+                move_robot(0, 0)
+    else:
+        move_robot(0, 0)
+        gesture = "Stop"
+
+    # Display Gesture Info
+    cv2.putText(frame, f"Gesture: {gesture}", (10, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 0), 2)
+
+    # Resize frame for smaller display
+    frame = cv2.resize(frame, (480, 360))
+    cv2.imshow("🤖 One-Hand Gesture Control - Pioneer P3DX", frame)
+
+    # Exit
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        move_robot(0, 0)
+        break
+
+# ---------------------------------------
+# Cleanup
+# ---------------------------------------
+cap.release()
+cv2.destroyAllWindows()
+move_robot(0, 0)
+print("🛑 Stopped.")
