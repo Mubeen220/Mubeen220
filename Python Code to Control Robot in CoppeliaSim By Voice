@@ -1,0 +1,87 @@
+import speech_recognition as sr
+from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+import time
+
+# ---------------------------------------
+# Connect to CoppeliaSim
+# ---------------------------------------
+print("🔌 Connecting to CoppeliaSim...")
+client = RemoteAPIClient()
+sim = client.getObject('sim')
+left_motor = sim.getObject('/PioneerP3DX/leftMotor')
+right_motor = sim.getObject('/PioneerP3DX/rightMotor')
+print("✅ Connected to CoppeliaSim!")
+
+# ---------------------------------------
+# Speech Recognition Setup
+# ---------------------------------------
+recognizer = sr.Recognizer()
+mic = sr.Microphone()
+
+# ---------------------------------------
+# Robot Movement Functions
+# ---------------------------------------
+def move_robot(left_speed, right_speed):
+    sim.setJointTargetVelocity(left_motor, left_speed)
+    sim.setJointTargetVelocity(right_motor, right_speed)
+
+def stop_robot():
+    move_robot(0, 0)
+    print("🛑 Robot stopped")
+
+# ---------------------------------------
+# Voice Command Logic
+# ---------------------------------------
+def execute_command(command):
+    command = command.lower()
+    print(f"🎙️ You said: {command}")
+
+    if "forward" in command or "ahead" in command:
+        move_robot(2, 2)
+        print("🚗 Moving forward")
+    elif "back" in command or "reverse" in command:
+        move_robot(-2, -2)
+        print("🔙 Moving backward")
+    elif "left" in command:
+        move_robot(-2, 2)
+        print("↩️ Turning left")
+    elif "right" in command:
+        move_robot(2, -2)
+        print("↪️ Turning right")
+    elif "stop" in command:
+        stop_robot()
+    elif "exit" in command or "quit" in command:
+        stop_robot()
+        print("👋 Exiting control program.")
+        return False
+    else:
+        print("🤔 Command not recognized. Try again.")
+    return True
+
+# ---------------------------------------
+# Main Loop
+# ---------------------------------------
+print("\n🎤 Voice Control Active!")
+print("Say commands like: forward, back, left, right, stop, exit\n")
+
+with mic as source:
+    recognizer.adjust_for_ambient_noise(source, duration=1)
+    print("Ready to listen...")
+
+running = True
+while running:
+    with mic as source:
+        print("🎧 Listening...")
+        audio = recognizer.listen(source, phrase_time_limit=4)
+
+    try:
+        command = recognizer.recognize_google(audio)
+        running = execute_command(command)
+    except sr.UnknownValueError:
+        print("❌ Could not understand audio.")
+    except sr.RequestError as e:
+        print(f"⚠️ Speech Recognition error: {e}")
+    time.sleep(0.3)
+
+stop_robot()
+print("🛑 Program finished.")
